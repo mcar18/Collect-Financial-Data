@@ -37,7 +37,8 @@ SERIES = {
     "Retail_Sales":      "RSXFS",
     "Industrial_Prod":   "INDPRO",
     "Housing_Starts":    "HOUST",
-    "Fed_Funds_Rate":    "DFEDTAR",
+    "Fed_Funds_Rate_Daily":    "DFEDTAR",
+    "Fed_Funds_Rate_Monthly":    "FEDFUNDS",
     "TenY_Treasury":     "DGS10",
     "M2_Money_Stock":    "M2SL",
 }
