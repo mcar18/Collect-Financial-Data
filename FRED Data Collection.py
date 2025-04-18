@@ -24,23 +24,35 @@ if not FRED_API_KEY:
     sys.exit(1)
 
 # 2) Define the series you want to pull:
+# … earlier macro series …
 SERIES = {
-    "Real_GDP":      "GDPC1",
-    "GDP_Deflator":  "GDPDEF",
-    "CPI_All":       "CPIAUCSL",
-    "CPI_Core":      "CPILFESL",
-    "PPI_Commodities": "PPIACO",
-    "Unemployment_Rate": "UNRATE",
-    "Nonfarm_Payroll":   "PAYEMS",
-    "Initial_Claims":    "ICSA",
-    "Job_Openings":      "JTSJOL",
-    "Retail_Sales":      "RSXFS",
-    "Industrial_Prod":   "INDPRO",
-    "Housing_Starts":    "HOUST",
-    "Fed_Funds_Rate_Daily":    "DFEDTAR",
-    "Fed_Funds_Rate_Monthly":    "FEDFUNDS",
-    "TenY_Treasury":     "DGS10",
-    "M2_Money_Stock":    "M2SL",
+    "Real_GDP":            "GDPC1",
+    "GDP_Deflator":        "GDPDEF",
+    "CPI_All":             "CPIAUCSL",
+    "CPI_Core":            "CPILFESL",
+    "PPI_Commodities":     "PPIACO",
+    "Unemployment_Rate":   "UNRATE",
+    "Nonfarm_Payroll":     "PAYEMS",
+    "Initial_Claims":      "ICSA",
+    "Job_Openings":        "JTSJOL",
+    "Retail_Sales":        "RSXFS",
+    "Industrial_Prod":     "INDPRO",
+    "Housing_Starts":      "HOUST",
+    "Fed_Funds_Rate_Daily":"DFEDTAR",
+    "Fed_Funds_Rate_Monthly":"FEDFUNDS",
+    "TenY_Treasury":       "DGS10",
+    "M2_Money_Stock":      "M2SL",
+
+    # Major equity indices (all daily, not seasonally adjusted)
+    "S&P_500":                         "SP500",     # Broad large‐cap equities :contentReference[oaicite:1]{index=1}
+    "Dow_Jones_Industrial_Average":    "DJIA",      # Industrial sector :contentReference[oaicite:2]{index=2}
+    "NASDAQ_Composite_Index":          "NASDAQCOM", # Broad, tech‐heavy equities :contentReference[oaicite:3]{index=3}
+    "NASDAQ_100_Index":                "NASDAQ100", # Top 100 non‐financial NASDAQ companies :contentReference[oaicite:4]{index=4}
+
+    # Sector‐focused Dow Jones Averages
+    "Dow_Jones_Transportation_Average":"DJTA",      # Transportation sector :contentReference[oaicite:5]{index=5}
+    "Dow_Jones_Composite_Average":     "DJCA",      # Blue‐chip microcosm (Industrials + Utilities + Transports) :contentReference[oaicite:6]{index=6}
+    "Dow_Jones_Utility_Average":       "DJUA",      # Utilities sector :contentReference[oaicite:7]{index=7}
 }
 
 # 3) Output directory for CSVs
