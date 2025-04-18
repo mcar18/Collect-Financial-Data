@@ -2,8 +2,9 @@
 """
 macro_analysis.py
 
-Load FRED CSVs from a folder, compute year‑over‑year % changes on a monthly basis,
-print summary statistics, plot time series and correlations, and identify
+Load FRED CSVs from a folder, compute year‑over‑year % changes on a monthly basis
+(or YoY changes in basis points for selected rate series), print summary statistics,
+plot time series and correlations (blue = +1, red = –1), and identify
 the top macro drivers for each equity index.
 """
 
@@ -19,7 +20,17 @@ from functools import reduce
 DATA_DIR = Path("C:/Users/Owner/OneDrive/Documents/FSU Graduate School/Python Code/Collect-Financial-Data/data/fred")        # ← update to your actual CSV folder
 CSV_PATTERN = "*.csv"
 RESAMPLE_FREQ = "M"                 # monthly frequency
-EQUITY_PREFIXES = ["S&P", "Dow_Jones", "NASDAQ"]  # detect equity series by these prefixes
+
+# Series for which we compute YoY change in bps instead of %:
+RATE_SERIES = {
+    "Fed_Funds_Rate_Daily",
+    "Fed_Funds_Rate_Monthly",
+    "TenY_Treasury",
+    "Unemployment_Rate",
+}
+
+# How we detect equity series by their filename prefixes:
+EQUITY_PREFIXES = ["S&P", "Dow_Jones", "NASDAQ"]
 TOP_N_DRIVERS = 5                   # how many top correlates to show
 
 # ----------------------------------------------------------------------
@@ -31,32 +42,39 @@ def load_all_csvs(folder: Path, pattern: str = "*.csv") -> pd.DataFrame:
         raise FileNotFoundError(f"No files found in {folder} matching {pattern}")
     dfs = []
     for f in files:
-        # each CSV: first column is date, unnamed header; second column is the series
+        # Read CSV: first column = date (index), second column = series values
         df = pd.read_csv(f, index_col=0, parse_dates=True)
-        df.columns = [f.stem]               # rename value column to filename stem
+        df.columns = [f.stem]  # rename column to the filename stem
         dfs.append(df)
-    # outer‑join on the datetime index
-    df_raw = reduce(lambda left, right: left.join(right, how="outer"), dfs)
-    return df_raw
+    # Outer‑join all on the datetime index
+    return reduce(lambda a, b: a.join(b, how="outer"), dfs)
 
 # ----------------------------------------------------------------------
-# 2. TRANSFORM: YEAR‑OVER‑YEAR % CHANGE (MONTHLY)
+# 2. TRANSFORM: YEAR‑OVER‑YEAR % CHANGE / BPS (MONTHLY)
 # ----------------------------------------------------------------------
 def transform_data(df_raw: pd.DataFrame) -> pd.DataFrame:
-    # Resample to month‑end frequency and take last observation
-    df_monthly = df_raw.resample(RESAMPLE_FREQ).last()
-    # Forward‑fill missing values
-    df_ff = df_monthly.ffill()
-    # Compute YoY % change
-    df_yoy = df_ff.pct_change(12) * 100
-    # Drop the first 12 rows (all-NaN)
-    return df_yoy.dropna(how="all")
+    # 2.1 Resample to month‑end, take last obs
+    df_m = df_raw.resample(RESAMPLE_FREQ).last()
+    # 2.2 Forward‑fill gaps
+    df_ff = df_m.ffill()
+    # 2.3 Compute YoY transforms
+    trans = {}
+    for col in df_ff.columns:
+        if col in RATE_SERIES:
+            # diff in %-points ×100 → basis points
+            trans[f"{col}_yoy_bps"] = df_ff[col].diff(12) * 100
+        else:
+            # percent change ×100 → % change
+            trans[f"{col}_yoy_pct"] = df_ff[col].pct_change(12) * 100
+    df_trans = pd.DataFrame(trans, index=df_ff.index)
+    # drop the initial 12 rows (all‑NaN)
+    return df_trans.dropna(how="all")
 
 # ----------------------------------------------------------------------
 # 3. PRINT SUMMARY STATISTICS
 # ----------------------------------------------------------------------
 def print_summary(df: pd.DataFrame):
-    print("\n=== Descriptive Statistics (Year‑over‑Year % Change) ===")
+    print("\n=== Descriptive Statistics ===")
     print(df.describe().T)
 
 # ----------------------------------------------------------------------
@@ -66,9 +84,8 @@ def plot_time_series(df: pd.DataFrame):
     for col in df.columns:
         plt.figure(figsize=(10, 3))
         plt.plot(df.index, df[col], label=col)
-        plt.title(f"YoY % Change: {col}")
-        plt.ylabel("% Change")
-        plt.legend()
+        plt.title(col)
+        plt.ylabel("YoY % Change" if col.endswith("_pct") else "YoY bps")
         plt.tight_layout()
         plt.show()
 
@@ -78,11 +95,18 @@ def plot_time_series(df: pd.DataFrame):
 def plot_correlation_matrix(df: pd.DataFrame):
     corr = df.corr()
     plt.figure(figsize=(12, 10))
-    im = plt.imshow(corr.values, aspect="auto", interpolation="none")
+    im = plt.imshow(
+        corr.values,
+        aspect="auto",
+        interpolation="none",
+        cmap="bwr_r",   # reversed blue-white-red: +1→blue, –1→red
+        vmin=-1,
+        vmax=1
+    )
     plt.colorbar(im, label="Correlation")
     plt.xticks(np.arange(len(corr)), corr.columns, rotation=90)
     plt.yticks(np.arange(len(corr)), corr.columns)
-    plt.title("Correlation Matrix (YoY % Change)")
+    plt.title("Correlation Matrix")
     plt.tight_layout()
     plt.show()
 
@@ -94,7 +118,6 @@ def identify_top_macro_drivers(df: pd.DataFrame,
                                top_n: int = TOP_N_DRIVERS):
     if equity_prefixes is None:
         equity_prefixes = EQUITY_PREFIXES
-    # equity columns = those starting with any of the equity_prefixes
     eq_cols = [c for c in df.columns if any(c.startswith(p) for p in equity_prefixes)]
     macro_cols = [c for c in df.columns if c not in eq_cols]
     corr = df.corr()
@@ -107,18 +130,14 @@ def identify_top_macro_drivers(df: pd.DataFrame,
 # MAIN
 # ----------------------------------------------------------------------
 def main():
-    # 1) Load raw data
     df_raw = load_all_csvs(DATA_DIR, CSV_PATTERN)
     print(f"Loaded {df_raw.shape[1]} series from '{DATA_DIR}'")
     print("Series names:", list(df_raw.columns))
-    # 2) Transform
+
     df = transform_data(df_raw)
-    # 3) Summary
     print_summary(df)
-    # 4) Plots
     plot_time_series(df)
     plot_correlation_matrix(df)
-    # 5) Top drivers
     identify_top_macro_drivers(df)
 
 if __name__ == "__main__":
