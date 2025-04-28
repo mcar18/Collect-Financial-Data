@@ -29,9 +29,9 @@ KEY_ITEMS = [
 def clean_quarterly(df):
     """ Fill relationships, compute margins, leverage, ROA/ROE, YoY% """
     # COGS <-> GrossProfit
-    if "Revenues" in df:
+    if "Revenues" in df.columns:
         cogs = df.get("CostOfGoodsAndServicesSold", pd.Series(np.nan, index=df.index))
-        gp   = df.get("GrossProfit", pd.Series(np.nan, index=df.index))
+        gp = df.get("GrossProfit", pd.Series(np.nan, index=df.index))
         df["GrossProfit"] = gp.fillna(df["Revenues"] - cogs)
         df["CostOfGoodsAndServicesSold"] = cogs.fillna(df["Revenues"] - gp)
 
@@ -53,16 +53,15 @@ def clean_quarterly(df):
         inv = df.get("InventoryNet", pd.Series(0, index=df.index))
         df["QuickRatio"] = (ca - inv) / cl
 
-    std = df.get("ShortTermDebt", pd.Series(0, index=df.index))
-    ltd = df.get("LongTermDebtNoncurrent", pd.Series(0, index=df.index))
-    eq  = df.get("StockholdersEquity", pd.Series(np.nan, index=df.index))
-    total_debt = std.fillna(0) + ltd.fillna(0)
+    std = df.get("ShortTermDebt", pd.Series(0, index=df.index)).fillna(0)
+    ltd = df.get("LongTermDebtNoncurrent", pd.Series(0, index=df.index)).fillna(0)
+    eq = df.get("StockholdersEquity", pd.Series(np.nan, index=df.index))
     if not eq.isna().all():
-        df["DebtToEquity"] = total_debt / eq
+        df["DebtToEquity"] = (std + ltd) / eq
 
     # Returns
     assets = df.get("Assets", pd.Series(np.nan, index=df.index))
-    ni     = df.get("NetIncomeLoss", pd.Series(np.nan, index=df.index))
+    ni = df.get("NetIncomeLoss", pd.Series(np.nan, index=df.index))
     if not assets.isna().all():
         df["ROA"] = ni / assets
     if not eq.isna().all():
@@ -71,15 +70,13 @@ def clean_quarterly(df):
     # YoY% changes
     for item in KEY_ITEMS:
         if item in df.columns:
-            df[f"{item}_YoY_%"] = df[item].pct_change(
-                periods=4, fill_method=None
-            ) * 100
+            df[f"{item}_YoY_%"] = df[item].pct_change(periods=4, fill_method=None) * 100
 
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     return df
 
 def process_ticker(ticker):
-    # 1) Load full fundamentals
+    # 1) Load quarterly full fundamentals
     in_path = os.path.join(INPUT_BASE, ticker, "fundamentals_full.csv")
     df_q = pd.read_csv(in_path, index_col="period_end", parse_dates=True).sort_index()
 
@@ -87,17 +84,19 @@ def process_ticker(ticker):
     df_q = df_q.astype(float)
     df_q = clean_quarterly(df_q)
 
-    # 3) Daily price pull
-    tkr   = yf.Ticker(ticker)
+    # 3) Pull daily prices
+    tkr = yf.Ticker(ticker)
     start = df_q.index.min().strftime("%Y-%m-%d")
     today = datetime.today().strftime("%Y-%m-%d")
     price = tkr.history(start=start, end=today)["Close"].rename("Close")
     if price.index.tz is not None:
         price.index = price.index.tz_localize(None)
 
-    # 4) Forward-fill quarterlies to daily
-    df_daily = price.to_frame().join(df_q, how="left")
-    df_daily.ffill(inplace=True)
+    # 4) Build a daily DataFrame, reindex the quarterly onto it, then forward-fill
+    df_daily = pd.DataFrame(index=price.index)
+    df_daily["Close"] = price
+    df_q_daily = df_q.reindex(df_daily.index, method="ffill")
+    df_daily = df_daily.join(df_q_daily)
 
     # 5) Market Cap & Enterprise Value
     shares = tkr.info.get("sharesOutstanding", np.nan)
@@ -106,20 +105,23 @@ def process_ticker(ticker):
     std = df_daily.get("ShortTermDebt", pd.Series(0, index=df_daily.index)).fillna(0)
     ltd = df_daily.get("LongTermDebtNoncurrent", pd.Series(0, index=df_daily.index)).fillna(0)
     cash = pd.Series(0, index=df_daily.index)
-    for ctag in ["CashAndCashEquivalentsAtCarryingValue",
-                 "CashCashEquivalentsAndShortTermInvestments"]:
+    for ctag in [
+        "CashAndCashEquivalentsAtCarryingValue",
+        "CashCashEquivalentsAndShortTermInvestments"
+    ]:
         if ctag in df_daily.columns:
             cash = df_daily[ctag].fillna(0)
             break
+
     df_daily["EV"] = df_daily["MarketCap"] + std + ltd - cash
 
     # 6) Valuation multiples
-    ni_yoy = df_daily.get("NetIncomeLoss_YoY_%") / 100
-    df_daily["PE"]    = df_daily["MarketCap"] / df_daily.get("NetIncomeLoss", np.nan)
-    df_daily["PEG"]   = df_daily["PE"] / ni_yoy
-    df_daily["EV_GP"] = df_daily["EV"] / df_daily.get("GrossProfit", np.nan)
-    df_daily["PS"]    = df_daily["MarketCap"] / df_daily.get("Revenues", np.nan)
-    df_daily["EV_S"]  = df_daily["EV"] / df_daily.get("Revenues", np.nan)
+    ni_yoy = df_daily.get("NetIncomeLoss_YoY_%", pd.Series(np.nan, index=df_daily.index)) / 100
+    df_daily["PE"] = df_daily["MarketCap"] / df_daily.get("NetIncomeLoss", pd.Series(np.nan, index=df_daily.index))
+    df_daily["PEG"] = df_daily["PE"] / ni_yoy
+    df_daily["EV_GP"] = df_daily["EV"] / df_daily.get("GrossProfit", pd.Series(np.nan, index=df_daily.index))
+    df_daily["PS"] = df_daily["MarketCap"] / df_daily.get("Revenues", pd.Series(np.nan, index=df_daily.index))
+    df_daily["EV_S"] = df_daily["EV"] / df_daily.get("Revenues", pd.Series(np.nan, index=df_daily.index))
 
     # 7) Save
     out_dir = os.path.join(OUTPUT_BASE, ticker)
