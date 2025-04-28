@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 from datetime import datetime
-
+#stock price included too
 # Base folders
 INPUT_BASE  = "fundamental data gathered"
 OUTPUT_BASE = "cleaned fundamentals"
