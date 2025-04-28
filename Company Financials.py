@@ -7,14 +7,6 @@ HEADERS = {
     "User-Agent": "Your Name (your.email@example.com)"
 }
 
-# Possible GAAP element names per metric
-GAAP_TAGS = {
-    "GrossProfit":       ["GrossProfit", "GrossLoss"],
-    "Revenues":          ["Revenues", "SalesRevenueNet"],
-    "NetIncomeLoss":     ["NetIncomeLoss", "ProfitLoss"],
-    "OperatingCashFlow": ["NetCashProvidedByUsedInOperatingActivities"]
-}
-
 def get_cik_map():
     url = "https://www.sec.gov/files/company_tickers.json"
     r = requests.get(url, headers=HEADERS); r.raise_for_status()
@@ -24,43 +16,34 @@ def get_cik_map():
     df["cik"] = df["cik_str"].astype(int).astype(str).str.zfill(10)
     return df.set_index("ticker")["cik"].to_dict()
 
-def fetch_all_facts(cik):
+def fetch_all_line_items(cik):
     """
-    Returns a DataFrame indexed by period-end containing:
-    GrossProfit, Revenues, NetIncomeLoss, OperatingCashFlow,
-    plus derived YoY_Revenue_%, GrossMargin, NetMargin, OpCFMargin.
+    Pulls every US-GAAP line item in USD for each period-end.
+    Returns a DataFrame indexed by period_end with one column per tag.
     """
     url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
     r = requests.get(url, headers=HEADERS); r.raise_for_status()
     facts = r.json()["facts"]["us-gaap"]
 
     records = {}
-    for metric, tag_list in GAAP_TAGS.items():
-        for tag in tag_list:
-            for f in facts.get(tag, {}).get("units", {}).get("USD", []):
-                end = f.get("end")
-                val = f.get("val")
-                if not end or val is None:
-                    continue
-                rec = records.setdefault(end, {})
-                rec[metric] = float(val)
-            # stop on first tag that yields any data
-            if any(r.get(metric) is not None for r in records.values()):
-                break
+    for tag, content in facts.items():
+        # look only at the USD series
+        for f in content.get("units", {}).get("USD", []):
+            end = f.get("end")
+            val = f.get("val")
+            if end is None:
+                continue
+            rec = records.setdefault(end, {})
+            # convert to float or NaN
+            rec[tag] = float(val) if val is not None else np.nan
 
+    # build a wide DataFrame
     df = pd.DataFrame.from_dict(records, orient="index")
+    # ensure all columns are floats (missing entries become NaN)
+    df = df.astype(float)
+    # index as datetime
     df.index = pd.to_datetime(df.index)
     df.sort_index(inplace=True)
-
-    # cast everything to float, so missing slots become NaN
-    df = df.astype(float)
-
-    # derived metrics
-    df["YoY_Revenue_%"] = df["Revenues"].pct_change(periods=4, fill_method=None) * 100
-    df["GrossMargin"]   = df["GrossProfit"] / df["Revenues"]
-    df["NetMargin"]     = df["NetIncomeLoss"] / df["Revenues"]
-    df["OpCFMargin"]    = df["OperatingCashFlow"] / df["Revenues"]
-
     return df
 
 if __name__ == "__main__":
@@ -73,22 +56,22 @@ if __name__ == "__main__":
     for ticker in tickers:
         cik = cik_map.get(ticker.upper())
         if not cik:
-            print(f"⚠️  No CIK found for {ticker}, skipping.")
+            print(f"⚠️  No CIK for {ticker}, skipping.")
             continue
 
-        print(f"Fetching facts for {ticker}…")
-        df = fetch_all_facts(cik)
+        print(f"Fetching all line items for {ticker}…")
+        df = fetch_all_line_items(cik)
         if df.empty:
             print(f"  ❌ No data returned for {ticker}.")
             continue
 
-        # Create ticker-specific folder
+        # Create ticker folder
         ticker_folder = os.path.join(base_folder, ticker)
         os.makedirs(ticker_folder, exist_ok=True)
 
-        # Save to CSV
-        csv_path = os.path.join(ticker_folder, "fundamentals.csv")
+        # Save the full wide CSV
+        csv_path = os.path.join(ticker_folder, "fundamentals_full.csv")
         df.to_csv(csv_path, index_label="period_end")
-        print(f"  ✅ Saved {len(df)} rows to `{csv_path}`\n")
+        print(f"  ✅ Saved {df.shape[0]} periods × {df.shape[1]} items → `{csv_path}`\n")
 
-    print("Done gathering fundamental data.")
+    print("Done gathering full fundamental line items.")
