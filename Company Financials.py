@@ -47,7 +47,7 @@ def fetch_all_line_items(cik):
     return df
 
 if __name__ == "__main__":
-    tickers = ["AAPL", "MSFT"]
+    tickers = ["AAPL", "MSFT","JPM"]
     cik_map = get_cik_map()
 
     base_folder = "fundamental data gathered"
